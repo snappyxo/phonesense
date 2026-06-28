@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>phonesense · capture</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #111; color: #eee; font-family: system-ui, sans-serif; }
+  #video { width: 100%; display: block; background: #000; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px; }
+  button, select { font-size: 16px; padding: 10px 14px; border-radius: 8px; border: 1px solid #444;
+                   background: #222; color: #eee; }
+  button.primary { background: #2563eb; border-color: #2563eb; }
+  button:disabled { opacity: .5; }
+  label { font-size: 14px; opacity: .85; }
+  #status { padding: 0 10px 10px; font-size: 14px; }
+  .ok { color: #4ade80; } .err { color: #f87171; } .warn { color: #fbbf24; }
+</style>
+</head>
+<body>
+<video id="video" playsinline autoplay muted></video>
+<div class="bar">
+  <button id="start" class="primary">Start</button>
+  <button id="stop" disabled>Stop</button>
+  <button id="sensors">Enable sensors</button>
+  <label>Camera
+    <select id="facing">
+      <option value="environment">Rear</option>
+      <option value="user">Front</option>
+    </select>
+  </label>
+  <label>Quality
+    <select id="quality">
+      <option value="0.4">Low</option>
+      <option value="0.6" selected>Medium</option>
+      <option value="0.8">High</option>
+    </select>
+  </label>
+  <label>FPS
+    <select id="fps">
+      <option>10</option>
+      <option selected>15</option>
+      <option>24</option>
+    </select>
+  </label>
+  <label>Sensor Hz
+    <select id="rate">
+      <option>10</option>
+      <option selected>15</option>
+      <option>30</option>
+      <option>60</option>
+    </select>
+  </label>
+</div>
+<div id="status">Idle. Tap <b>Start</b> and allow camera access.</div>
+
+<canvas id="canvas" hidden></canvas>
+
+<script>
+const video   = document.getElementById('video');
+const canvas  = document.getElementById('canvas');
+const ctx     = canvas.getContext('2d');
+const startBtn = document.getElementById('start');
+const stopBtn  = document.getElementById('stop');
+const facingEl = document.getElementById('facing');
+const qualityEl = document.getElementById('quality');
+const fpsEl    = document.getElementById('fps');
+const rateEl   = document.getElementById('rate');
+const statusEl = document.getElementById('status');
+const sensorsBtn = document.getElementById('sensors');
+
+let stream = null;     // MediaStream
+let ws = null;         // WebSocket
+let timer = null;      // capture interval
+let wakeLock = null;
+let busy = false;      // backpressure: skip a frame if the previous send is in flight
+
+// ---- Motion sensors --------------------------------------------------------
+let sensorsOn = false;
+let sensorTimer = null;
+let geoWatch = null;
+const latest = {
+  accel: null,     // m/s² including gravity
+  linAccel: null,  // m/s² with gravity removed
+  gyro: null,      // °/s
+  orient: null,    // {alpha,beta,gamma}
+  heading: null,   // compass heading, ° (0=N)
+  gps: null,       // {lat,lon,alt,speed,acc}
+};
+
+function onMotion(e) {
+  const a = e.accelerationIncludingGravity;
+  if (a && a.x !== null) latest.accel = { x: a.x, y: a.y, z: a.z };
+  const la = e.acceleration; // gravity removed (may be null on some devices)
+  if (la && la.x !== null) latest.linAccel = { x: la.x, y: la.y, z: la.z };
+  const r = e.rotationRate;
+  if (r && r.alpha !== null) latest.gyro = { x: r.beta, y: r.gamma, z: r.alpha }; // deg/s
+}
+function onOrient(e) {
+  if (e.alpha !== null) latest.orient = { alpha: e.alpha, beta: e.beta, gamma: e.gamma };
+  // Compass heading: iOS exposes webkitCompassHeading; absolute events give true north.
+  if (typeof e.webkitCompassHeading === 'number') latest.heading = e.webkitCompassHeading;
+  else if (e.absolute && e.alpha !== null) latest.heading = 360 - e.alpha; // approx true heading
+}
+
+async function enableSensors() {
+  try {
+    // iOS 13+ requires a permission request from a user gesture.
+    const DM = window.DeviceMotionEvent, DO = window.DeviceOrientationEvent;
+    if (DM && typeof DM.requestPermission === 'function') {
+      const r = await DM.requestPermission();
+      if (r !== 'granted') throw new Error('motion permission denied');
+    }
+    if (DO && typeof DO.requestPermission === 'function') {
+      await DO.requestPermission().catch(() => {});
+    }
+    window.addEventListener('devicemotion', onMotion);
+    window.addEventListener('deviceorientation', onOrient);
+    // Absolute orientation (true compass heading) where available.
+    window.addEventListener('deviceorientationabsolute', onOrient);
+
+    // GPS (best-effort; permission prompt is separate, may be denied/unavailable).
+    if (navigator.geolocation) {
+      geoWatch = navigator.geolocation.watchPosition((pos) => {
+        const c = pos.coords;
+        latest.gps = {
+          lat: c.latitude, lon: c.longitude, alt: c.altitude,
+          speed: c.speed, acc: c.accuracy,
+        };
+      }, () => {}, { enableHighAccuracy: true, maximumAge: 1000 });
+    }
+
+    sensorsOn = true;
+    sensorsBtn.textContent = 'Sensors on ✓';
+    sensorsBtn.disabled = true;
+    startSensorLoop();
+  } catch (err) {
+    setStatus('Sensors unavailable: ' + err.message, 'warn');
+  }
+}
+
+function startSensorLoop() {
+  if (sensorTimer) clearInterval(sensorTimer);
+  const hz = parseInt(rateEl.value, 10) || 15;
+  sensorTimer = setInterval(() => {
+    if (!sensorsOn || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!latest.accel && !latest.gyro && !latest.orient) return;
+    ws.send(JSON.stringify({
+      type: 'sensor',
+      t: Date.now(),
+      accel: latest.accel,
+      linAccel: latest.linAccel,
+      gyro: latest.gyro,
+      orient: latest.orient,
+      heading: latest.heading,
+      gps: latest.gps,
+    }));
+  }, Math.round(1000 / hz));
+}
+
+// Change the send rate live when the selector changes.
+rateEl.addEventListener('change', () => { if (sensorsOn) startSensorLoop(); });
+
+function setStatus(msg, cls) {
+  statusEl.innerHTML = msg;
+  statusEl.className = cls || '';
+}
+
+async function acquireWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+    }
+  } catch (e) { /* non-fatal */ }
+}
+
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible' && stream) await acquireWakeLock();
+});
+
+async function start() {
+  startBtn.disabled = true;
+  try {
+    setStatus('Requesting camera…', 'warn');
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: facingEl.value, width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false,
+    });
+    video.srcObject = stream;
+    await video.play();
+    await acquireWakeLock();
+
+    // Open the WebSocket back to the server that served this page.
+    const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ingest';
+    ws = new WebSocket(wsUrl);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      setStatus('Streaming ✓ — open the dashboard on your computer.', 'ok');
+      stopBtn.disabled = false;
+      startCaptureLoop();
+    };
+    ws.onclose = (ev) => {
+      const why = ev.reason ||
+        (ev.code === 1001 ? 'another device connected to the server' : 'connection closed');
+      setStatus('Disconnected: ' + why, 'warn');
+      stop();
+    };
+    ws.onerror = () => { setStatus('WebSocket error.', 'err'); };
+  } catch (e) {
+    setStatus('Camera/connection failed: ' + e.message, 'err');
+    startBtn.disabled = false;
+  }
+}
+
+function startCaptureLoop() {
+  const fps = parseInt(fpsEl.value, 10);
+  const quality = parseFloat(qualityEl.value);
+  const track = stream.getVideoTracks()[0];
+  const { width, height } = track.getSettings();
+  canvas.width  = width  || 640;
+  canvas.height = height || 480;
+
+  timer = setInterval(() => {
+    if (busy || !ws || ws.readyState !== WebSocket.OPEN) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    busy = true;
+    canvas.toBlob((blob) => {
+      if (blob && ws && ws.readyState === WebSocket.OPEN) {
+        blob.arrayBuffer().then((buf) => {
+          try { ws.send(buf); } catch (e) { /* dropped */ }
+          busy = false;
+        });
+      } else {
+        busy = false;
+      }
+    }, 'image/jpeg', quality);
+  }, Math.round(1000 / fps));
+}
+
+function stop() {
+  if (timer) { clearInterval(timer); timer = null; }
+  if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+  if (statusEl.className !== 'err') setStatus('Stopped.', '');
+}
+
+startBtn.addEventListener('click', start);
+stopBtn.addEventListener('click', stop);
+sensorsBtn.addEventListener('click', enableSensors);
+</script>
+</body>
+</html>

@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>phonesense · dashboard</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0b0b0d; color: #eee; font-family: system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+           border-bottom: 1px solid #222; }
+  h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #555; }
+  .dot.live { background: #4ade80; box-shadow: 0 0 8px #4ade80; }
+  #statusText { font-size: 13px; opacity: .85; }
+  main { display: grid; place-items: center; padding: 16px; gap: 16px; }
+  .stage { position: relative; width: 100%; max-width: 880px; aspect-ratio: 4 / 3;
+           background: #000; border: 1px solid #222; border-radius: 12px; overflow: hidden; }
+  #feed { width: 100%; height: 100%; object-fit: contain; display: none; }
+  #placeholder { position: absolute; inset: 0; display: grid; place-items: center;
+                 text-align: center; color: #888; font-size: 14px; padding: 24px; }
+  code { background: #1a1a1f; padding: 2px 6px; border-radius: 5px; color: #ddd; }
+  .meta { font-size: 12px; opacity: .6; text-align: center; }
+  .connect { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  #qr { background: #fff; padding: 8px; border-radius: 10px; }
+  .connect-text { text-align: left; max-width: 260px; display: grid; gap: 6px; color: #ccc; font-size: 14px; }
+  .connect-text b { color: #fff; }
+  .hint { font-size: 12px; opacity: .7; }
+
+  .panels { width: 100%; max-width: 880px; display: grid; gap: 12px;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .card { background: #141417; border: 1px solid #222; border-radius: 12px; padding: 12px 14px; }
+  .card h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: #cbd5e1;
+             display: flex; justify-content: space-between; align-items: baseline; }
+  .card h2 small { color: #777; font-weight: 400; }
+  canvas { display: block; width: 100%; }
+  .legend { display: flex; gap: 14px; font-size: 12px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 14px;
+        font-variant-numeric: tabular-nums; }
+  .kv .v { text-align: right; color: #4ade80; }
+  .attitude { display: flex; gap: 12px; justify-content: space-around; align-items: center; }
+  #sensors[hidden] { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <h1>phonesense</h1>
+  <span id="statusText">Waiting for a feed…</span>
+</header>
+<main>
+  <div class="stage">
+    <img id="feed" alt="live feed">
+    <div id="placeholder">
+      <div class="connect">
+        <img id="qr" src="/qr.svg" alt="scan to connect" width="180" height="180">
+        <div class="connect-text">
+          <b>Scan to connect your phone</b>
+          <div>Point the phone camera at this code, or open:</div>
+          <code id="phoneLink">/phone</code>
+          <div class="hint">Then tap through the certificate warning once and press <b>Start</b>.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section id="sensors" class="panels" hidden>
+    <div class="card">
+      <h2>Accelerometer <small>m/s²</small></h2>
+      <canvas id="accelChart" height="140"></canvas>
+      <div class="legend">
+        <span><i class="swatch" style="background:#f87171"></i>x <b id="ax">–</b></span>
+        <span><i class="swatch" style="background:#4ade80"></i>y <b id="ay">–</b></span>
+        <span><i class="swatch" style="background:#60a5fa"></i>z <b id="az">–</b></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Gyroscope <small>°/s</small></h2>
+      <canvas id="gyroChart" height="140"></canvas>
+      <div class="legend">
+        <span><i class="swatch" style="background:#f87171"></i>x <b id="gx">–</b></span>
+        <span><i class="swatch" style="background:#4ade80"></i>y <b id="gy">–</b></span>
+        <span><i class="swatch" style="background:#60a5fa"></i>z <b id="gz">–</b></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Attitude <small>tilt · heading</small></h2>
+      <div class="attitude">
+        <canvas id="horizon" width="130" height="130"></canvas>
+        <canvas id="compass" width="130" height="130"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Orientation <small>°</small></h2>
+      <div class="kv">
+        <div>α (yaw)</div><div class="v" id="oa">–</div>
+        <div>β (pitch)</div><div class="v" id="ob">–</div>
+        <div>γ (roll)</div><div class="v" id="og">–</div>
+        <div>heading</div><div class="v" id="hd">–</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Linear accel <small>gravity removed, m/s²</small></h2>
+      <div class="kv">
+        <div>x</div><div class="v" id="lx">–</div>
+        <div>y</div><div class="v" id="ly">–</div>
+        <div>z</div><div class="v" id="lz">–</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Location & device</h2>
+      <div class="kv">
+        <div>lat</div><div class="v" id="lat">–</div>
+        <div>lon</div><div class="v" id="lon">–</div>
+        <div>alt (m)</div><div class="v" id="alt">–</div>
+        <div>speed (m/s)</div><div class="v" id="spd">–</div>
+        <div>GPS acc (m)</div><div class="v" id="gacc">–</div>
+        <div>rate</div><div class="v" id="hz">–</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="meta">
+    Tip: to test without a phone, open <code id="phoneUrl">/phone</code> in another tab —
+    it will use this computer's webcam.
+  </div>
+</main>
+
+<script>
+// ---- Phone URL / QR --------------------------------------------------------
+fetch('/info').then(r => r.json()).then(info => {
+  document.getElementById('phoneUrl').textContent = info.phone_url;
+  document.getElementById('phoneLink').textContent = info.phone_url;
+}).catch(() => {
+  const u = location.origin + '/phone';
+  document.getElementById('phoneUrl').textContent = u;
+  document.getElementById('phoneLink').textContent = u;
+});
+
+// ---- Live video status -----------------------------------------------------
+const feed = document.getElementById('feed');
+const placeholder = document.getElementById('placeholder');
+const dot = document.getElementById('dot');
+const statusText = document.getElementById('statusText');
+function goLive() {
+  feed.style.display = 'block'; placeholder.style.display = 'none';
+  dot.classList.add('live'); statusText.textContent = 'Live';
+}
+function goOffline(msg) { dot.classList.remove('live'); statusText.textContent = msg || 'Waiting for the phone feed…'; }
+
+// Liveness comes from the server (did a frame arrive recently?), NOT from the
+// <img>, whose load/naturalWidth signals are unreliable for a steady MJPEG.
+async function pollStatus() {
+  try {
+    const s = await (await fetch('/status', { cache: 'no-store' })).json();
+    s.streaming ? goLive() : goOffline();
+  } catch (e) { goOffline('Server unreachable…'); }
+}
+setInterval(pollStatus, 1000);
+pollStatus();
+feed.addEventListener('error', () => { feed.src = '/camera/stream?ts=' + Date.now(); }); // re-subscribe if dropped
+feed.src = '/camera/stream?ts=' + Date.now();
+
+// ---- Strip chart (canvas, no deps) -----------------------------------------
+const N = 240; // samples kept on screen
+class StripChart {
+  constructor(canvas, colors) {
+    this.canvas = canvas; this.ctx = canvas.getContext('2d'); this.colors = colors;
+    this.buf = colors.map(() => new Array(N).fill(0));
+    this.resize();
+    addEventListener('resize', () => this.resize());
+  }
+  resize() {
+    const dpr = devicePixelRatio || 1;
+    const w = this.canvas.clientWidth || 300, h = parseInt(this.canvas.getAttribute('height'), 10);
+    this.canvas.width = w * dpr; this.canvas.height = h * dpr;
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.w = w; this.h = h;
+  }
+  push(vals) {
+    for (let i = 0; i < this.buf.length; i++) {
+      this.buf[i].push(Number.isFinite(vals[i]) ? vals[i] : 0);
+      this.buf[i].shift();
+    }
+  }
+  draw() {
+    const { ctx, w, h } = this;
+    ctx.clearRect(0, 0, w, h);
+    // symmetric autoscale from current data
+    let max = 1;
+    for (const s of this.buf) for (const v of s) max = Math.max(max, Math.abs(v));
+    max *= 1.15;
+    const midY = h / 2, scale = (h / 2 - 4) / max;
+    // grid
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(w, midY); ctx.stroke();
+    ctx.fillStyle = '#555'; ctx.font = '10px system-ui';
+    ctx.fillText('+' + max.toFixed(0), 2, 11);
+    ctx.fillText('-' + max.toFixed(0), 2, h - 3);
+    // series
+    for (let i = 0; i < this.buf.length; i++) {
+      const s = this.buf[i];
+      ctx.strokeStyle = this.colors[i]; ctx.lineWidth = 1.5; ctx.beginPath();
+      for (let j = 0; j < s.length; j++) {
+        const x = (j / (N - 1)) * w, y = midY - s[j] * scale;
+        j ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      }
+      ctx.stroke();
+    }
+  }
+}
+const SERIES = ['#f87171', '#4ade80', '#60a5fa'];
+const accelChart = new StripChart(document.getElementById('accelChart'), SERIES);
+const gyroChart  = new StripChart(document.getElementById('gyroChart'), SERIES);
+
+// ---- Artificial horizon (pitch/roll) ---------------------------------------
+const horizon = document.getElementById('horizon').getContext('2d');
+function drawHorizon(pitch, roll) {
+  const c = horizon, R = 65;
+  c.save(); c.clearRect(0, 0, 130, 130);
+  c.translate(65, 65); c.beginPath(); c.arc(0, 0, R, 0, Math.PI * 2); c.clip();
+  c.rotate(-(roll || 0) * Math.PI / 180);
+  const off = Math.max(-R, Math.min(R, (pitch || 0) * 1.2));
+  c.fillStyle = '#3b82f6'; c.fillRect(-R, -R, 2 * R, R + off);       // sky
+  c.fillStyle = '#7c5b3f'; c.fillRect(-R, off, 2 * R, R - off + R);  // ground
+  c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath();
+  c.moveTo(-R, off); c.lineTo(R, off); c.stroke();
+  c.restore();
+  // fixed aircraft reference
+  c.strokeStyle = '#fbbf24'; c.lineWidth = 2; c.beginPath();
+  c.moveTo(65 - 22, 65); c.lineTo(65 - 6, 65); c.moveTo(65 + 6, 65); c.lineTo(65 + 22, 65);
+  c.moveTo(65, 65 - 3); c.lineTo(65, 65 + 3); c.stroke();
+  c.strokeStyle = '#444'; c.beginPath(); c.arc(65, 65, 65, 0, Math.PI * 2); c.stroke();
+}
+
+// ---- Compass ---------------------------------------------------------------
+const compass = document.getElementById('compass').getContext('2d');
+function drawCompass(heading) {
+  const c = compass; c.clearRect(0, 0, 130, 130);
+  c.save(); c.translate(65, 65);
+  c.strokeStyle = '#444'; c.beginPath(); c.arc(0, 0, 60, 0, Math.PI * 2); c.stroke();
+  c.save(); c.rotate(-((heading || 0) * Math.PI / 180));
+  const marks = [['N', 0, '#f87171'], ['E', 90, '#aaa'], ['S', 180, '#aaa'], ['W', 270, '#aaa']];
+  c.font = '12px system-ui'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  for (const [lbl, deg, col] of marks) {
+    const a = deg * Math.PI / 180;
+    c.fillStyle = col; c.fillText(lbl, Math.sin(a) * 46, -Math.cos(a) * 46);
+  }
+  c.restore();
+  // fixed needle pointing up = current heading
+  c.fillStyle = '#fbbf24'; c.beginPath();
+  c.moveTo(0, -40); c.lineTo(-7, 6); c.lineTo(7, 6); c.closePath(); c.fill();
+  c.restore();
+  c.fillStyle = '#ccc'; c.font = '11px system-ui'; c.textAlign = 'center';
+  c.fillText(heading == null ? '—' : Math.round(heading) + '°', 65, 122);
+}
+
+// ---- SSE: push every reading -----------------------------------------------
+const sensorsEl = document.getElementById('sensors');
+const set = (id, v, d = 2) => document.getElementById(id).textContent =
+  (v === null || v === undefined || Number.isNaN(v)) ? '–' : (typeof v === 'number' ? v.toFixed(d) : v);
+let pending = null, lastT = 0, rate = 0;
+
+function render() {
+  pending = null;
+  accelChart.draw(); gyroChart.draw();
+}
+function onReading(s) {
+  if (!s || s.type !== 'sensor') return;
+  sensorsEl.hidden = false;
+  const a = s.accel || {}, g = s.gyro || {}, o = s.orient || {}, l = s.linAccel || {}, p = s.gps || {};
+  accelChart.push([a.x, a.y, a.z]);
+  gyroChart.push([g.x, g.y, g.z]);
+  set('ax', a.x); set('ay', a.y); set('az', a.z);
+  set('gx', g.x); set('gy', g.y); set('gz', g.z);
+  set('oa', o.alpha); set('ob', o.beta); set('og', o.gamma); set('hd', s.heading, 0);
+  set('lx', l.x); set('ly', l.y); set('lz', l.z);
+  set('lat', p.lat, 5); set('lon', p.lon, 5); set('alt', p.alt, 1);
+  set('spd', p.speed, 2); set('gacc', p.acc, 1);
+  drawHorizon(o.beta, o.gamma);
+  drawCompass(s.heading);
+  // estimate incoming rate
+  if (lastT) { const dt = s.t - lastT; if (dt > 0) rate = 0.8 * rate + 0.2 * (1000 / dt); }
+  lastT = s.t; set('hz', rate ? Math.round(rate) + ' Hz' : null);
+  if (!pending) pending = requestAnimationFrame(render);
+}
+
+function connectSensors() {
+  const es = new EventSource('/sensors/stream');
+  es.onmessage = (e) => { try { onReading(JSON.parse(e.data)); } catch (_) {} };
+  es.onerror = () => { /* EventSource auto-reconnects */ };
+}
+connectSensors();
+</script>
+</body>
+</html>
