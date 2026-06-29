@@ -41,18 +41,44 @@ class Camera:
     ``stop()`` is a method.
     """
 
-    def __init__(self, app, host, port, lan_ip, thread, loop):
+    def __init__(self, app, host, port, lan_ips, thread, loop):
         self._app = app
         self._thread = thread
         self._loop = loop
         self.host = host
         self.port = port
-        self.lan_ip = lan_ip
+        self.lan_ips = list(lan_ips)
+        self.lan_ip = self.lan_ips[0]
 
     # -- connection info (fixed at start()) -------------------------------- #
     @property
     def base_url(self):
         return f"https://{self.lan_ip}:{self.port}"
+
+    @property
+    def phone_urls(self):
+        """Phone-page URL for every candidate LAN IP (primary first).
+
+        One entry on a single-network host; several when the host is multi-homed,
+        so a phone can open whichever address is on its own subnet.
+        """
+        return [f"https://{ip}:{self.port}/phone" for ip in self.lan_ips]
+
+    def select_ip(self, ip):
+        """Advertise ``ip`` (one of ``lan_ips``) as the connection address.
+
+        Repoints every derived URL (``base_url`` and friends) and the dashboard's
+        server-side QR at the chosen interface, so a multi-homed host can settle on
+        the address the phone shares. The server itself binds all interfaces, so no
+        re-listen is needed — this only changes what's advertised.
+        """
+        if ip not in self.lan_ips:
+            raise ValueError(
+                f"{ip!r} is not one of this server's addresses: {self.lan_ips}"
+            )
+        self.lan_ip = ip
+        if self._app is not None:
+            self._app["phone_url"] = f"https://{ip}:{self.port}/phone"
 
     @property
     def dashboard_url(self):
@@ -165,8 +191,9 @@ def start(port=8080, host="0.0.0.0", cert_dir=None, qr=True) -> Camera:
                 f"call stop() first or start() on a different port."
             )
 
-    lan_ip = server.get_lan_ip()
-    cert_path, key_path = tls.ensure_cert(lan_ip, cert_dir=cert_dir)
+    lan_ips = server.get_lan_ips()
+    lan_ip = lan_ips[0]
+    cert_path, key_path = tls.ensure_cert(lan_ips, cert_dir=cert_dir)
 
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ssl_ctx.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
@@ -217,7 +244,7 @@ def start(port=8080, host="0.0.0.0", cert_dir=None, qr=True) -> Camera:
     with _ACTIVE_LOCK:
         _ACTIVE_PORTS.add(port)
 
-    return Camera(app, host, port, lan_ip, thread, box["loop"])
+    return Camera(app, host, port, lan_ips, thread, box["loop"])
 
 
 async def _shutdown(runner):

@@ -21,11 +21,13 @@ the phone's upload (frames + sensors over one WebSocket).
 
 import asyncio
 import io
+import ipaddress
 import json
 import socket
 import time
 from importlib.resources import files
 
+import psutil
 import segno
 from aiohttp import WSCloseCode, WSMsgType, web
 
@@ -225,16 +227,55 @@ async def feed_mjpeg(request):
 # --------------------------------------------------------------------------- #
 # Networking helper
 # --------------------------------------------------------------------------- #
-def get_lan_ip() -> str:
-    """Best-effort LAN IP (no packets actually sent on a UDP socket)."""
+def get_lan_ips() -> list[str]:
+    """Every usable LAN IPv4 address on this host, best guess first.
+
+    The first entry is the source IP the OS would use to reach an external host
+    — the default-route interface, which is the right address on a single-network
+    machine. Every other IPv4 address bound to a real interface follows, so a phone
+    on a different interface's subnet (a second NIC, a separate Wi-Fi) always has
+    its reachable address offered rather than guessed away. Loopback, link-local
+    and unspecified addresses are dropped. Falls back to ``["127.0.0.1"]`` if
+    nothing usable is found.
+
+    No packets are sent: ``connect()`` on a UDP socket only primes the routing
+    table so ``getsockname()`` reports the chosen source IP.
+    """
+    candidates: list[str] = []
+
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("8.8.8.8", 80))
-        return s.getsockname()[0]
+        candidates.append(s.getsockname()[0])
     except OSError:
-        return "127.0.0.1"
+        pass
     finally:
         s.close()
+
+    # Every IPv4 address on every interface — psutil enumerates them the same way
+    # on each OS, so a second NIC or Wi-Fi on a different subnet is never missed.
+    for addrs in psutil.net_if_addrs().values():
+        for addr in addrs:
+            if addr.family == socket.AF_INET:
+                candidates.append(addr.address)
+
+    usable: list[str] = []
+    for ip in candidates:
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            continue
+        if addr.is_loopback or addr.is_link_local or addr.is_unspecified:
+            continue
+        if ip not in usable:
+            usable.append(ip)
+
+    return usable or ["127.0.0.1"]
+
+
+def get_lan_ip() -> str:
+    """Best-effort primary LAN IP — the default-route address from get_lan_ips()."""
+    return get_lan_ips()[0]
 
 
 def build_app() -> web.Application:

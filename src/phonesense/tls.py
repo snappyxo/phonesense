@@ -28,12 +28,15 @@ def default_cert_dir() -> Path:
     return Path(user_data_dir("phonesense"))
 
 
-def ensure_cert(lan_ip: str, cert_dir=None):
+def ensure_cert(lan_ips, cert_dir=None):
     """Return (cert_path, key_path), generating the pair on first run.
 
-    The cert carries ``lan_ip`` in its SAN so the phone can reach it by IP.
-    Once written, the pair is reused (no regeneration) on subsequent runs.
+    ``lan_ips`` is one IP string or an iterable of them; each goes into the cert's
+    SAN so the phone validates against the same cert whichever advertised address
+    it connects to. Once written, the pair is reused (no regeneration) on later runs.
     """
+    if isinstance(lan_ips, str):
+        lan_ips = [lan_ips]
     cert_dir = Path(cert_dir) if cert_dir is not None else default_cert_dir()
     cert_dir.mkdir(parents=True, exist_ok=True)
     cert_path = cert_dir / "cert.pem"
@@ -54,10 +57,11 @@ def ensure_cert(lan_ip: str, cert_dir=None):
         x509.DNSName(CERT_NAME),
         x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
     ]
-    try:
-        san.append(x509.IPAddress(ipaddress.ip_address(lan_ip)))
-    except ValueError:
-        pass  # not a literal IP; the DNS entries still cover localhost
+    for lan_ip in lan_ips:
+        try:
+            san.append(x509.IPAddress(ipaddress.ip_address(lan_ip)))
+        except ValueError:
+            pass  # not a literal IP; the DNS entries still cover localhost
 
     cert = (
         x509.CertificateBuilder()
