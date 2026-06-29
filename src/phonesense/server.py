@@ -70,12 +70,18 @@ class LatestHub:
 # --------------------------------------------------------------------------- #
 # Routes
 # --------------------------------------------------------------------------- #
+# The phone and dashboard pages are tiny and change between releases, so serve
+# them no-cache — otherwise a phone keeps showing a stale capture page after an
+# upgrade (e.g. old button labels / behavior).
+_NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+
+
 async def phone_page(request):
-    return web.FileResponse(WEB_DIR / "phone.html")
+    return web.FileResponse(WEB_DIR / "phone.html", headers=_NO_CACHE)
 
 
 async def index_page(request):
-    return web.FileResponse(WEB_DIR / "dashboard.html")
+    return web.FileResponse(WEB_DIR / "dashboard.html", headers=_NO_CACHE)
 
 
 async def info_json(request):

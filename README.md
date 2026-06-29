@@ -76,8 +76,10 @@ non-interactive run (piped/no terminal) keeps the default.
 
 1. Open `https://<your-lan-ip>:8080/phone` (scan the printed QR to skip typing).
 2. Tap through the one-time certificate warning (the cert is self-signed).
-3. Tap **Start** — the dashboard at `https://<your-lan-ip>:8080/` shows live
-   video. **Enable sensors** streams motion data.
+3. Tap **Start camera** (left) for live video on the dashboard at
+   `https://<your-lan-ip>:8080/`, and/or **Start sensors** (right) for motion
+   data. The two are fully independent — run either on its own, and stopping one
+   leaves the other streaming.
 
 > No phone handy? Open `/phone` in a second browser tab on the computer to use
 > the computer's webcam instead.

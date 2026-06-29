@@ -7,75 +7,145 @@
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: #111; color: #eee; font-family: system-ui, sans-serif; }
-  #video { width: 100%; display: block; background: #000; }
-  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px; }
+  html, body { height: 100%; }
+  /* Fixed-height flex column that never scrolls: the video flexes to fill the
+     space above the controls, and the bars keep their natural height. */
+  body { margin: 0; background: #111; color: #eee; font-family: system-ui, sans-serif;
+         height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+  /* contain keeps aspect ratio inside the flex area, so the frame never overflows
+     and forces a scrollbar regardless of the camera's resolution. */
+  #video { flex: 1 1 auto; min-height: 0; width: 100%; object-fit: contain; background: #000; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px; flex: none; }
+  .toggles { justify-content: space-between; }      /* camera left, sensors right */
+  .toggles button { flex: 1 1 0; min-width: 0; }    /* equal halves, side by side */
+  /* camera settings left, sensor settings right. Each group is an equal half, so
+     it lines up with — and matches the width of — its Start button above (which
+     are also equal halves sharing the same row padding + gap). */
+  .settings { flex-wrap: nowrap; align-items: flex-start; }
+  .group { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .settings .group { flex: 1 1 0; min-width: 0; }
+  /* let the controls fill the width of their half-width group */
+  .settings .group label { width: 100%; }
+  .settings .group select { flex: 1 1 auto; min-width: 0; }
+  .settings .group .seg-group { display: flex; width: 100%; }
+  .settings .group .seg-group .seg { flex: 1 1 0; }
   button, select { font-size: 16px; padding: 10px 14px; border-radius: 8px; border: 1px solid #444;
                    background: #222; color: #eee; }
-  button.primary { background: #2563eb; border-color: #2563eb; }
+  button.primary { background: #2563eb; border-color: #2563eb; }  /* idle: main CTA */
+  button.on { background: #16a34a; border-color: #16a34a; }       /* running: tap to stop */
+  /* Rear/Front segmented toggle: two joined buttons, the active one highlighted. */
+  .seg-group { display: inline-flex; }
+  .seg-group .seg { border-radius: 0; border-left-width: 0; }
+  .seg-group .seg:first-child { border-radius: 8px 0 0 8px; border-left-width: 1px; }
+  .seg-group .seg:last-child { border-radius: 0 8px 8px 0; }
+  .seg.active { background: #2563eb; border-color: #2563eb; }
   button:disabled { opacity: .5; }
-  label { font-size: 14px; opacity: .85; }
-  #status { padding: 0 10px 10px; font-size: 14px; }
-  .ok { color: #4ade80; } .err { color: #f87171; } .warn { color: #fbbf24; }
+  /* keep each label's text on the same row as its selector */
+  label { font-size: 14px; opacity: .85; display: inline-flex; align-items: center; gap: 6px;
+          white-space: nowrap; }
+  .col { flex-direction: column; align-items: stretch; }  /* stack Quality over FPS, full width */
+  /* First-tap activation gate */
+  #activate { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
+              align-items: center; justify-content: center; gap: 14px; padding: 24px;
+              text-align: center; background: #111; }
+  #activate[hidden] { display: none; }
+  #activate button { font-size: 20px; padding: 16px 28px; background: #2563eb; border-color: #2563eb; }
 </style>
 </head>
 <body>
-<video id="video" playsinline autoplay muted></video>
-<div class="bar">
-  <button id="start" class="primary">Start</button>
-  <button id="stop" disabled>Stop</button>
-  <button id="sensors">Enable sensors</button>
-  <label>Camera
-    <select id="facing">
-      <option value="environment">Rear</option>
-      <option value="user">Front</option>
-    </select>
-  </label>
-  <label>Quality
-    <select id="quality">
-      <option value="0.4">Low</option>
-      <option value="0.6" selected>Medium</option>
-      <option value="0.8">High</option>
-    </select>
-  </label>
-  <label>FPS
-    <select id="fps">
-      <option>10</option>
-      <option selected>15</option>
-      <option>24</option>
-    </select>
-  </label>
-  <label>Sensor Hz
-    <select id="rate">
-      <option>10</option>
-      <option selected>15</option>
-      <option>30</option>
-      <option>60</option>
-    </select>
-  </label>
+<!-- First-tap gate: blocks the UI until tapped. The tap is the user gesture that
+     starts the screen-keep-awake (and Wake Lock), so iOS never shows a play
+     button and no control is reachable before the screen is kept on. -->
+<div id="activate">
+  <button type="button" id="activateBtn">▶&nbsp; Tap to start</button>
 </div>
-<div id="status">Idle. Tap <b>Start</b> and allow camera access.</div>
+<!-- No autoplay: it has no source until the camera starts, and an empty
+     autoplay video makes iOS show a (blocked-autoplay) play button. start()
+     calls video.play() explicitly inside the tap gesture instead. -->
+<video id="video" playsinline muted></video>
+<div class="bar toggles">
+  <button id="camBtn" class="primary">Start camera</button>
+  <button id="sensorBtn">Start sensors</button>
+</div>
+<div class="bar settings">
+  <div class="group col">
+    <div class="seg-group" id="facing" role="group" aria-label="Camera">
+      <button type="button" class="seg active" data-facing="environment">Rear</button>
+      <button type="button" class="seg" data-facing="user">Front</button>
+    </div>
+    <label>Quality
+      <select id="quality">
+        <option value="0.4">Low</option>
+        <option value="0.6" selected>Medium</option>
+        <option value="0.8">High</option>
+      </select>
+    </label>
+    <label>FPS
+      <select id="fps">
+        <option>10</option>
+        <option selected>15</option>
+        <option>24</option>
+      </select>
+    </label>
+  </div>
+  <div class="group">
+    <label>Sensor Hz
+      <select id="rate">
+        <option>10</option>
+        <option selected>15</option>
+        <option>30</option>
+        <option>60</option>
+      </select>
+    </label>
+  </div>
+</div>
 
 <canvas id="canvas" hidden></canvas>
+<!-- Keeps the screen awake where the Wake Lock API is unavailable: a 1px muted
+     video playing a canvas-generated stream (same mechanism that keeps the
+     screen on during a live camera, but with no camera and no permission). -->
+<video id="keepawake" muted loop playsinline disablepictureinpicture
+       style="position:fixed; left:0; top:0; width:1px; height:1px; opacity:0; pointer-events:none;"></video>
 
 <script>
 const video   = document.getElementById('video');
 const canvas  = document.getElementById('canvas');
 const ctx     = canvas.getContext('2d');
-const startBtn = document.getElementById('start');
-const stopBtn  = document.getElementById('stop');
-const facingEl = document.getElementById('facing');
+const camBtn   = document.getElementById('camBtn');
+const sensorBtn = document.getElementById('sensorBtn');
+const facingGroup = document.getElementById('facing');
 const qualityEl = document.getElementById('quality');
 const fpsEl    = document.getElementById('fps');
 const rateEl   = document.getElementById('rate');
-const statusEl = document.getElementById('status');
-const sensorsBtn = document.getElementById('sensors');
+// No on-screen status line; status is tracked internally so the error gate (an
+// 'err' state suppresses later 'ok'/'warn' overwrites) keeps working.
+const statusEl = { innerHTML: '', className: '' };
+
+let facing = 'environment';  // 'environment' = rear, 'user' = front
+function videoConstraints() {
+  return { facingMode: facing, width: { ideal: 640 }, height: { ideal: 480 } };
+}
 
 let stream = null;     // MediaStream
-let ws = null;         // WebSocket
+let ws = null;         // WebSocket — the one upload socket, shared by camera + sensors
+let socketReady = null;// Promise resolving when ws reaches OPEN (rejecting on connect error)
 let timer = null;      // capture interval
 let wakeLock = null;
 let busy = false;      // backpressure: skip a frame if the previous send is in flight
+let cameraOn = false;  // camera capture running
+let camBusy = false;   // camera start in flight (disables its toggle)
+let sensorBusy = false;// sensor enable in flight (disables its toggle)
+
+// One source of truth for the two toggles: blue = idle camera CTA, green = running
+// (tap to stop), disabled while a start/enable is mid-flight.
+function renderControls() {
+  camBtn.textContent = cameraOn ? 'Stop camera' : 'Start camera';
+  camBtn.className = cameraOn ? 'on' : 'primary';
+  camBtn.disabled = camBusy;
+  sensorBtn.textContent = sensorsOn ? 'Stop sensors' : 'Start sensors';
+  sensorBtn.className = sensorsOn ? 'on' : 'primary';
+  sensorBtn.disabled = sensorBusy;
+}
 
 // ---- Motion sensors --------------------------------------------------------
 let sensorsOn = false;
@@ -105,7 +175,21 @@ function onOrient(e) {
   else if (e.absolute && e.alpha !== null) latest.heading = 360 - e.alpha; // approx true heading
 }
 
-async function enableSensors() {
+// Sensors toggle (right button). Works with or without the camera.
+async function onSensorClick() {
+  keepScreenOn();  // gesture-time retry for browsers that require one
+  if (sensorBusy) return;
+  if (sensorsOn) {
+    stopSensors();
+    closeSocketIfIdle();
+    renderControls();
+    if (statusEl.className !== 'err') {
+      setStatus(cameraOn ? 'Sensors stopped. Camera still streaming ✓' : 'Sensors stopped.',
+                cameraOn ? 'ok' : '');
+    }
+    return;
+  }
+  sensorBusy = true; renderControls();
   try {
     // iOS 13+ requires a permission request from a user gesture.
     const DM = window.DeviceMotionEvent, DO = window.DeviceOrientationEvent;
@@ -116,13 +200,14 @@ async function enableSensors() {
     if (DO && typeof DO.requestPermission === 'function') {
       await DO.requestPermission().catch(() => {});
     }
+    // Same function reference each time, so a re-enable after a drop won't double-register.
     window.addEventListener('devicemotion', onMotion);
     window.addEventListener('deviceorientation', onOrient);
     // Absolute orientation (true compass heading) where available.
     window.addEventListener('deviceorientationabsolute', onOrient);
 
     // GPS (best-effort; permission prompt is separate, may be denied/unavailable).
-    if (navigator.geolocation) {
+    if (navigator.geolocation && geoWatch === null) {
       geoWatch = navigator.geolocation.watchPosition((pos) => {
         const c = pos.coords;
         latest.gps = {
@@ -132,12 +217,19 @@ async function enableSensors() {
       }, () => {}, { enableHighAccuracy: true, maximumAge: 1000 });
     }
 
+    // Open the upload socket if the camera hasn't already — sensors stream over
+    // the same connection and work with or without the camera running.
+    await ensureSocket();
     sensorsOn = true;
-    sensorsBtn.textContent = 'Sensors on ✓';
-    sensorsBtn.disabled = true;
     startSensorLoop();
+    if (!cameraOn && statusEl.className !== 'err') {
+      setStatus('Sensors streaming ✓ — open the dashboard on your computer.', 'ok');
+    }
   } catch (err) {
     setStatus('Sensors unavailable: ' + err.message, 'warn');
+    closeSocketIfIdle();
+  } finally {
+    sensorBusy = false; renderControls();
   }
 }
 
@@ -168,50 +260,146 @@ function setStatus(msg, cls) {
   statusEl.className = cls || '';
 }
 
+// Keep the screen awake for the whole page (not just while the camera runs), so
+// a phone left on a desk streaming sensors — or nothing — never sleeps.
+//
+// Most browsers only grant the lock from a user gesture and silently reject the
+// page-load attempt, so we (re)request it on the first tap and on every later
+// gesture, when the tab becomes visible again (it's auto-dropped while hidden),
+// and if it's released back to us while still on-screen. Each path is a no-op
+// once the lock is held.
 async function acquireWakeLock() {
   try {
-    if ('wakeLock' in navigator) {
+    if ('wakeLock' in navigator && (!wakeLock || wakeLock.released)) {
       wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => {
+        if (document.visibilityState === 'visible') acquireWakeLock();
+      });
     }
-  } catch (e) { /* non-fatal */ }
+  } catch (e) { /* non-fatal — retried on the next gesture / visibility change */ }
 }
 
-document.addEventListener('visibilitychange', async () => {
-  if (document.visibilityState === 'visible' && stream) await acquireWakeLock();
-});
+// Fallback for browsers/devices where the Wake Lock API isn't honored: play a
+// muted canvas-backed video. Playing a MediaStream in a <video> holds the screen
+// on the same way the live camera does, but needs no camera and runs whether or
+// not the camera/sensors are active. Idempotent; safe to call alongside the lock.
+//
+// MUST be first invoked from a user gesture: iOS blocks autoplay otherwise and
+// shows a play button on the (1px) video. So it's only reached via keepScreenOn()
+// on a tap, never at page load.
+const keepAwakeVideo = document.getElementById('keepawake');
+let keepAwakeStarted = false;
+function startScreenKeepAwake() {
+  if (keepAwakeStarted) { keepAwakeVideo.play().catch(() => {}); return; }
+  try {
+    const c = document.createElement('canvas');
+    c.width = c.height = 2;
+    const cx = c.getContext('2d');
+    // Repaint periodically so the captured stream keeps emitting frames.
+    let on = false;
+    setInterval(() => { on = !on; cx.fillStyle = on ? '#000' : '#010101'; cx.fillRect(0, 0, 2, 2); }, 1000);
+    keepAwakeVideo.srcObject = c.captureStream();
+    keepAwakeStarted = true;
+    keepAwakeVideo.play().catch(() => {});
+  } catch (e) { /* captureStream unsupported — rely on the Wake Lock API */ }
+}
 
-async function start() {
-  startBtn.disabled = true;
+// Engaged from the first tap (and later gestures). Always try the Wake Lock API;
+// only fall back to the video where the API is absent, so modern Android/desktop/
+// iOS use the efficient lock and skip the continuous video decode. (Checked
+// synchronously, not via the lock's async result, so the video's play() stays
+// inside the user gesture iOS requires.)
+function keepScreenOn() {
+  acquireWakeLock();
+  if (!('wakeLock' in navigator)) startScreenKeepAwake();
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  acquireWakeLock();
+  // Resume the fallback only if a prior gesture already started it (re-creating
+  // it here, without a gesture, would re-trigger iOS's play button).
+  if (keepAwakeStarted) keepAwakeVideo.play().catch(() => {});
+});
+// Any tap is a valid user gesture; cheap because both paths no-op once engaged.
+document.addEventListener('pointerdown', keepScreenOn);
+
+// ---- Upload socket (shared by camera + sensors) ----------------------------
+// One WebSocket to /ingest carries both JPEG frames (binary) and sensor JSON
+// (text). Whichever feature starts first opens it; the other reuses it. It stays
+// up while either is active and is dropped once both stop.
+function ensureSocket() {
+  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+    return socketReady;
+  }
+  const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ingest';
+  ws = new WebSocket(wsUrl);
+  ws.binaryType = 'arraybuffer';
+  socketReady = new Promise((resolve, reject) => {
+    ws.addEventListener('open', () => resolve(), { once: true });
+    ws.addEventListener('error', () => reject(new Error('connection failed')), { once: true });
+  });
+  ws.onclose = onSocketClose;
+  return socketReady;
+}
+
+// Unexpected close (network drop, or another phone taking over): the transport
+// is gone, so tear down both producers and reset the UI.
+function onSocketClose(ev) {
+  const why = ev.reason ||
+    (ev.code === 1001 ? 'another device connected to the server'
+                      : 'connection closed (code ' + ev.code + ')');
+  ws = null;
+  socketReady = null;
+  stopCamera();
+  stopSensors();
+  renderControls();
+  if (statusEl.className !== 'err') setStatus('Disconnected: ' + why, 'warn');
+}
+
+// Drop the socket once nothing needs it. Detach onclose first so this
+// intentional close stays silent (no "Disconnected" banner).
+function closeSocketIfIdle() {
+  if (ws && !cameraOn && !sensorsOn) {
+    ws.onclose = null;
+    try { ws.close(); } catch (e) {}
+    ws = null;
+    socketReady = null;
+  }
+}
+
+// Camera toggle (left button). Works with or without the sensors.
+async function onCamClick() {
+  keepScreenOn();  // gesture-time retry for browsers that require one
+  if (camBusy) return;
+  if (cameraOn) {
+    stopCamera();
+    closeSocketIfIdle();
+    renderControls();
+    if (statusEl.className !== 'err') {
+      setStatus(sensorsOn ? 'Camera stopped. Sensors still streaming ✓' : 'Camera stopped.',
+                sensorsOn ? 'ok' : '');
+    }
+    return;
+  }
+  camBusy = true; renderControls();
   try {
     setStatus('Requesting camera…', 'warn');
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: facingEl.value, width: { ideal: 640 }, height: { ideal: 480 } },
-      audio: false,
-    });
+    stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints(), audio: false });
     video.srcObject = stream;
     await video.play();
-    await acquireWakeLock();
 
-    // Open the WebSocket back to the server that served this page.
-    const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ingest';
-    ws = new WebSocket(wsUrl);
-    ws.binaryType = 'arraybuffer';
-
-    ws.onopen = () => {
-      setStatus('Streaming ✓ — open the dashboard on your computer.', 'ok');
-      stopBtn.disabled = false;
-      startCaptureLoop();
-    };
-    ws.onclose = (ev) => {
-      const why = ev.reason ||
-        (ev.code === 1001 ? 'another device connected to the server' : 'connection closed');
-      setStatus('Disconnected: ' + why, 'warn');
-      stop();
-    };
-    ws.onerror = () => { setStatus('WebSocket error.', 'err'); };
+    // Open the upload socket, or reuse the one sensors already opened.
+    await ensureSocket();
+    cameraOn = true;
+    setStatus('Camera streaming ✓ — open the dashboard on your computer.', 'ok');
+    startCaptureLoop();
   } catch (e) {
     setStatus('Camera/connection failed: ' + e.message, 'err');
-    startBtn.disabled = false;
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    closeSocketIfIdle();
+  } finally {
+    camBusy = false; renderControls();
   }
 }
 
@@ -240,19 +428,75 @@ function startCaptureLoop() {
   }, Math.round(1000 / fps));
 }
 
-function stop() {
-  if (timer) { clearInterval(timer); timer = null; }
-  if (ws) { try { ws.close(); } catch (e) {} ws = null; }
-  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-  if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
-  startBtn.disabled = false;
-  stopBtn.disabled = true;
-  if (statusEl.className !== 'err') setStatus('Stopped.', '');
+// ---- Rear/Front toggle -----------------------------------------------------
+// Highlight the active facing and, if the camera is already running, switch to
+// it live — re-acquiring just the video stream without dropping the socket or
+// the sensor stream.
+function renderFacing() {
+  facingGroup.querySelectorAll('.seg').forEach((b) => {
+    b.classList.toggle('active', b.dataset.facing === facing);
+  });
 }
 
-startBtn.addEventListener('click', start);
-stopBtn.addEventListener('click', stop);
-sensorsBtn.addEventListener('click', enableSensors);
+async function setFacing(next) {
+  if (next === facing) return;
+  facing = next;
+  renderFacing();
+  if (!cameraOn) return;  // not streaming yet — applies on next Start
+  setStatus('Switching camera…', 'warn');
+  let next_stream;
+  try {
+    next_stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints(), audio: false });
+  } catch (e) {
+    setStatus('Could not switch camera: ' + e.message, 'warn');
+    return;
+  }
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  stream = next_stream;
+  video.srcObject = stream;
+  try { await video.play(); } catch (e) { /* autoplay quirks, non-fatal */ }
+  if (timer) { clearInterval(timer); timer = null; }  // restart loop to pick up new frame size
+  startCaptureLoop();
+  setStatus('Camera streaming ✓ — open the dashboard on your computer.', 'ok');
+}
+
+facingGroup.querySelectorAll('.seg').forEach((b) => {
+  b.addEventListener('click', () => setFacing(b.dataset.facing));
+});
+
+// Tear down just the camera's resources (capture loop + media stream). Caller
+// re-renders the controls and sets status; the socket, the sensor stream, and
+// the screen wake lock (page-level) are left untouched.
+function stopCamera() {
+  if (timer) { clearInterval(timer); timer = null; }
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  cameraOn = false;
+  busy = false;
+}
+
+// Tear down just the sensor stream. Motion listeners stay registered (cheap and
+// idempotent); the GPS watch is released since it drains battery.
+function stopSensors() {
+  if (sensorTimer) { clearInterval(sensorTimer); sensorTimer = null; }
+  if (geoWatch !== null) { navigator.geolocation.clearWatch(geoWatch); geoWatch = null; }
+  sensorsOn = false;
+}
+
+camBtn.addEventListener('click', onCamClick);
+sensorBtn.addEventListener('click', onSensorClick);
+renderControls();
+
+// First tap activates: engage the screen-keep-awake within the gesture, then
+// drop the gate so the camera/sensor controls become usable.
+document.getElementById('activate').addEventListener('click', function activate(e) {
+  keepScreenOn();
+  e.currentTarget.hidden = true;
+}, { once: true });
+
+// Try the Wake Lock on load (granted without a gesture where supported, e.g.
+// Android Chrome). The canvas-video fallback can't run until the first tap —
+// iOS blocks gesture-free autoplay — so it's engaged by the pointerdown handler.
+acquireWakeLock();
 </script>
 </body>
 </html>
