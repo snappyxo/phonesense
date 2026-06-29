@@ -6,7 +6,7 @@ Two ways to use it:
 
          import phonesense
          cam = phonesense.start()
-         frame = cam.read()          # latest BGR numpy frame, or None
+         jpeg = cam.jpeg             # latest JPEG bytes, or None — decode as you like
 
   2. Standalone server::
 

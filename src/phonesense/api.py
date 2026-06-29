@@ -1,14 +1,15 @@
-"""Importable API: run phonesense in-process and read frames directly.
+"""Importable API: run phonesense in-process and grab frames directly.
 
     import phonesense
     cam = phonesense.start()        # server in a background daemon thread
-    frame = cam.read()              # latest BGR numpy frame, or None (never blocks)
+    jpeg = cam.jpeg                 # latest JPEG bytes, or None (never blocks)
     ...
     cam.stop()
 
-The same machine that runs your OpenCV code runs the server, so there's no
-HTTPS hop, no self-signed-cert workaround, and no FFmpeg buffering on the
-consumer side. The phone still connects over HTTPS + WebSocket as before.
+The same machine that runs your code runs the server, so there's no HTTPS hop,
+no self-signed-cert workaround, and no FFmpeg buffering on the consumer side.
+phonesense hands you JPEG bytes; decode them with whatever you like. The phone
+still connects over HTTPS + WebSocket as before.
 """
 
 import asyncio
@@ -29,9 +30,15 @@ _ACTIVE_LOCK = threading.Lock()
 class Camera:
     """Handle to a running phonesense server. Returned by :func:`start`.
 
-    Property = cheap snapshot of current state; method = does real work or has
-    side effects. So ``jpeg``/``sensors``/``is_streaming`` and the URLs are
-    properties, while ``read()`` (decodes) and ``stop()`` (acts) are methods.
+    phonesense transports frames as JPEG bytes (:attr:`jpeg`) and depends on no
+    imaging library; decoding to an array is the consumer's one line, e.g.::
+
+        import cv2, numpy as np
+        frame = cv2.imdecode(np.frombuffer(cam.jpeg, np.uint8), cv2.IMREAD_COLOR)
+
+    Property = cheap snapshot of current state; method = has side effects. So
+    ``jpeg``/``sensors``/``is_streaming`` and the URLs are properties, while
+    ``stop()`` is a method.
     """
 
     def __init__(self, app, host, port, lan_ip, thread, loop):
@@ -88,30 +95,14 @@ class Camera:
         return f"{self.base_url}/qr.svg"
 
     # -- live data --------------------------------------------------------- #
-    def read(self):
-        """Latest frame as a BGR numpy array, or ``None`` if none yet.
-
-        Non-blocking — never waits for the phone. Decodes the stashed JPEG with
-        OpenCV; if numpy/opencv aren't installed, raises ImportError pointing at
-        :attr:`jpeg` (the dependency-free path).
-        """
-        data = self._app["latest_jpeg"]
-        if data is None:
-            return None
-        try:
-            import cv2
-            import numpy as np
-        except ImportError as exc:
-            raise ImportError(
-                "Camera.read() needs numpy + opencv to decode frames "
-                "(`pip install opencv-python`). For raw bytes with no extra "
-                "dependencies, use `cam.jpeg` instead."
-            ) from exc
-        return cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
-
     @property
     def jpeg(self):
-        """Latest raw JPEG bytes, or ``None`` (dependency-free)."""
+        """Latest frame as raw JPEG bytes, or ``None`` if none yet.
+
+        Non-blocking — never waits for the phone. Decode it with whatever you
+        like, e.g. ``cv2.imdecode(np.frombuffer(cam.jpeg, np.uint8),
+        cv2.IMREAD_COLOR)``.
+        """
         return self._app["latest_jpeg"]
 
     @property

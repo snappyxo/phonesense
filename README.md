@@ -16,14 +16,15 @@ Start the server from inside your OpenCV script and read frames directly — no
 separate process, no HTTPS hop, no self-signed-cert workaround:
 
 ```python
-import phonesense, cv2
+import phonesense, cv2, numpy as np
 
 cam = phonesense.start()                 # server starts in a background thread
 print("On your phone, open:", cam.phone_url)   # scan the QR the CLI prints, or type the URL
 
 while True:
-    frame = cam.read()                   # latest BGR frame, or None until the phone connects
-    if frame is not None:
+    jpeg = cam.jpeg                      # latest JPEG bytes, or None until the phone connects
+    if jpeg is not None:
+        frame = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
         cv2.imshow("phone", frame)
     if cv2.waitKey(1) == 27:             # Esc to quit
         break
@@ -31,8 +32,9 @@ while True:
 cam.stop()
 ```
 
-`cam.read()` never blocks: it returns the latest frame, or `None` until the
-phone has sent one.
+phonesense hands you JPEG bytes and depends on no imaging library — decode with
+OpenCV (above), Pillow, or anything else. `cam.jpeg` never blocks: it returns the
+latest frame's bytes, or `None` until the phone has sent one.
 
 ### 2. Standalone server
 
@@ -65,7 +67,7 @@ phonesense --port 8080 --host 0.0.0.0 --no-qr --cert-dir ./certs
 new value) and a **snapshot** (one current value per request).
 
 For **same-machine** use, the in-process API beats every HTTP route:
-`cam.read()` (BGR frame), `cam.jpeg` (raw bytes), `cam.sensors` (dict) have no
+`cam.jpeg` (raw bytes), `cam.sensors` (dict) have no
 HTTPS hop, no cert workaround, and no buffering. The HTTP endpoints below are
 the **off-machine** (or non-Python) paths.
 
@@ -117,7 +119,7 @@ Runnable scripts in [`examples/`](examples/):
 
 | File | Shows |
 |---|---|
-| [`opencv_import.py`](examples/opencv_import.py) | in-process — `phonesense.start()` + `cam.read()` loop (recommended, same machine) |
+| [`opencv_import.py`](examples/opencv_import.py) | in-process — `phonesense.start()` + `cam.jpeg` decode loop (recommended, same machine) |
 | [`opencv_url.py`](examples/opencv_url.py) | off-machine — `cv2.VideoCapture('https://<ip>:8080/camera/stream')` loop |
 | [`opencv_check.py`](examples/opencv_check.py) | diagnostic — confirms the feed is OpenCV-readable, with a manual-MJPEG fallback and a troubleshooting checklist |
 
@@ -128,8 +130,7 @@ Runnable scripts in [`examples/`](examples/):
 
 | Member | Kind | Returns / does |
 |---|---|---|
-| `read()` | method | latest frame as BGR numpy array, or `None` (non-blocking; needs opencv) |
-| `jpeg` | property | latest raw JPEG bytes, or `None` (dependency-free) |
+| `jpeg` | property | latest frame as raw JPEG bytes, or `None` (non-blocking) |
 | `sensors` | property | latest sensor dict, or `None` |
 | `is_streaming` | property | `True` if a frame arrived in the last ~2s |
 | `base_url`, `phone_url`, `dashboard_url`, `ingest_url`, `camera_url`, `camera_stream_url`, `sensors_url`, `sensors_stream_url`, `info_url`, `status_url`, `qr_url` | properties | the route URLs |
@@ -137,8 +138,10 @@ Runnable scripts in [`examples/`](examples/):
 | `stop()` | method | stop the server, join the thread |
 | `with ... as cam:` | context manager | `stop()` on exit |
 
-`numpy`/`opencv` are **not** dependencies of phonesense — only `read()`'s decode
-touches them, and your OpenCV project already has both.
+phonesense depends on **no imaging library** — it transports JPEG bytes and
+leaves decoding to you. Decode `cam.jpeg` with OpenCV
+(`cv2.imdecode(np.frombuffer(cam.jpeg, np.uint8), cv2.IMREAD_COLOR)`), Pillow, or
+anything else.
 
 ## Routes
 
