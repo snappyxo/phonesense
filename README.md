@@ -51,6 +51,27 @@ It prints the LAN URLs and a scannable QR code. Open the phone page, tap
 phonesense --port 8080 --host 0.0.0.0 --no-qr --cert-dir ./certs
 ```
 
+### Multiple network addresses
+
+If the computer has more than one address (Wi-Fi **and** Ethernet, a VPN, etc.),
+phonesense can't tell which one your phone shares — so instead of guessing, it
+lists every address and asks you to pick before showing the QR:
+
+```
+This computer has several network addresses.
+Pick the one on the same network as your phone:
+
+  1) 192.168.1.42  (default)
+  2) 10.0.0.5
+  Choice [1-2, Enter = 1]:
+```
+
+Choose the address on the **same Wi-Fi as the phone** (cellular won't work); the
+QR, URLs, and dashboard then all point at it. The default (Enter) is the
+internet-facing address, which is the right one on a single-network machine. With
+just one address there's nothing to pick — it shows the single QR as before. A
+non-interactive run (piped/no terminal) keeps the default.
+
 ## On the phone
 
 1. Open `https://<your-lan-ip>:8080/phone` (scan the printed QR to skip typing).
@@ -134,7 +155,9 @@ Runnable scripts in [`examples/`](examples/):
 | `sensors` | property | latest sensor dict, or `None` |
 | `is_streaming` | property | `True` if a frame arrived in the last ~2s |
 | `base_url`, `phone_url`, `dashboard_url`, `ingest_url`, `camera_url`, `camera_stream_url`, `sensors_url`, `sensors_stream_url`, `info_url`, `status_url`, `qr_url` | properties | the route URLs |
-| `lan_ip`, `host`, `port` | attributes | URL components |
+| `phone_urls` | property | phone-page URL for **every** candidate LAN IP (multi-homed hosts) |
+| `lan_ip`, `lan_ips`, `host`, `port` | attributes | URL components — `lan_ips` lists all candidate IPs; `lan_ip` is the advertised one |
+| `select_ip(ip)` | method | advertise a different one of `lan_ips` (repoints every URL + the dashboard QR) |
 | `stop()` | method | stop the server, join the thread |
 | `with ... as cam:` | context manager | `stop()` on exit |
 
