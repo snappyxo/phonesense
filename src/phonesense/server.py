@@ -26,6 +26,8 @@ import socket
 import time
 from importlib.resources import files
 
+import netifaces
+
 import segno
 from aiohttp import WSCloseCode, WSMsgType, web
 
@@ -226,15 +228,20 @@ async def feed_mjpeg(request):
 # Networking helper
 # --------------------------------------------------------------------------- #
 def get_lan_ip() -> str:
-    """Best-effort LAN IP (no packets actually sent on a UDP socket)."""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(("8.8.8.8", 80))
-        return s.getsockname()[0]
-    except OSError:
-        return "127.0.0.1"
-    finally:
-        s.close()
+    """Best-effort LAN IP. Prints all discovered addresses, returns the best one."""
+    seen: list[str] = []
+    for iface in netifaces.interfaces():
+        addrs = netifaces.ifaddresses(iface).get(netifaces.AF_INET, [])
+        for addr in addrs:
+            ip = addr.get("addr", "")
+            if ip and not ip.startswith("127.") and ip not in seen:
+                seen.append(ip)
+
+    if seen:
+        print(f"[phonesense] discovered LAN addresses: {', '.join(seen)}")
+        return seen[0]
+
+    return "127.0.0.1"
 
 
 def build_app() -> web.Application:

@@ -1,0 +1,5 @@
+aiohttp>=3.9
+segno>=1.6
+cryptography>=42
+platformdirs>=4
+netifaces>=0.11
