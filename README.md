@@ -1,6 +1,6 @@
 # phonesense
 
-Turn a phone into a LAN camera + motion-sensor source for Python/OpenCV — one
+Turn a phone into a LAN camera + motion-sensor source for Python — one
 line, no app to install. The phone's browser captures the camera and motion
 sensors and pushes them over your local network; your Python code reads frames
 and sensor data with zero setup on the phone.
@@ -12,7 +12,7 @@ camera, but useful anywhere you want a quick wireless webcam.
 
 ### 1. In-process (recommended, same machine)
 
-Start the server from inside your OpenCV script and read frames directly — no
+Start the server from inside your Python script and grab frames directly — no
 separate process, no HTTPS hop, no self-signed-cert workaround:
 
 ```python

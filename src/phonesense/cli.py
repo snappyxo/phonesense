@@ -33,7 +33,7 @@ def _print_banner(cam, qr=True):
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="phonesense",
-        description="Turn a phone into a LAN camera + motion-sensor source for OpenCV.",
+        description="Turn a phone into a LAN camera + motion-sensor source for Python.",
     )
     parser.add_argument("--port", type=int, default=8080, help="port to listen on (default 8080)")
     parser.add_argument("--host", default="0.0.0.0", help="host/interface to bind (default 0.0.0.0)")
