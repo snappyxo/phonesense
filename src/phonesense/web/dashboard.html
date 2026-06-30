@@ -7,41 +7,70 @@
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: #0b0b0d; color: #eee; font-family: system-ui, sans-serif; }
+  html, body { height: 100%; }
+  body { margin: 0; background: #0b0b0d; color: #eee; font-family: system-ui, sans-serif;
+         display: flex; flex-direction: column; overflow: hidden; }
   header { display: flex; align-items: center; gap: 12px; padding: 12px 16px;
-           border-bottom: 1px solid #222; }
+           border-bottom: 1px solid #222; flex: 0 0 auto; }
   h1 { font-size: 16px; margin: 0; font-weight: 600; }
   .dot { width: 10px; height: 10px; border-radius: 50%; background: #555; }
   .dot.live { background: #4ade80; box-shadow: 0 0 8px #4ade80; }
   #statusText { font-size: 13px; opacity: .85; }
-  main { display: grid; place-items: center; padding: 16px; gap: 16px; }
-  .stage { position: relative; width: 100%; max-width: 880px; aspect-ratio: 4 / 3;
+
+  /* Disconnected: a full-area QR gate. Connected: the two-column panels.
+     Exactly one is shown, driven by the phone's WebSocket being open. */
+  .gate { flex: 1 1 auto; min-height: 0; display: grid; place-items: center;
+          padding: 24px; overflow: auto; }
+  .gate[hidden] { display: none; }
+
+  /* Two columns, no page scroll: camera left, sensors right. */
+  main { flex: 1 1 auto; min-height: 0; display: grid; gap: 12px; padding: 12px;
+         grid-template-columns: 1fr 1fr; }
+  main[hidden] { display: none; }
+  .col { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  #sensorCol { overflow: hidden; }
+
+  .stage { position: relative; flex: 1 1 auto; min-height: 0; width: 100%;
            background: #000; border: 1px solid #222; border-radius: 12px; overflow: hidden; }
   #feed { width: 100%; height: 100%; object-fit: contain; display: none; }
-  #placeholder { position: absolute; inset: 0; display: grid; place-items: center;
-                 text-align: center; color: #888; font-size: 14px; padding: 24px; }
+  /* Shown inside the stage while connected but the camera feed is off. */
+  #cameraMsg { position: absolute; inset: 0; display: grid; place-items: center;
+               text-align: center; color: #888; font-size: 14px; padding: 24px; }
+  #cameraMsg[hidden] { display: none; }
   code { background: #1a1a1f; padding: 2px 6px; border-radius: 5px; color: #ddd; }
-  .meta { font-size: 12px; opacity: .6; text-align: center; }
   .connect { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; justify-content: center; }
   #qr { background: #fff; padding: 8px; border-radius: 10px; }
-  .connect-text { text-align: left; max-width: 260px; display: grid; gap: 6px; color: #ccc; font-size: 14px; }
+  .connect-text { text-align: left; max-width: 280px; display: grid; gap: 6px; color: #ccc; font-size: 14px; }
   .connect-text b { color: #fff; }
   .hint { font-size: 12px; opacity: .7; }
 
-  .panels { width: 100%; max-width: 880px; display: grid; gap: 12px;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-  .card { background: #141417; border: 1px solid #222; border-radius: 12px; padding: 12px 14px; }
-  .card h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: #cbd5e1;
+  /* Empty-state message shown when a side has no data yet. */
+  .msg { flex: 1 1 auto; display: grid; place-items: center; text-align: center;
+         color: #888; font-size: 14px; padding: 24px;
+         border: 1px dashed #222; border-radius: 12px; }
+  .msg[hidden] { display: none; }
+
+  /* Fill the column height and share it across 3 equal rows — no scroll. */
+  .panels { flex: 1 1 auto; min-height: 0; display: grid; gap: 10px;
+            grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; }
+  .card { background: #141417; border: 1px solid #222; border-radius: 12px; padding: 8px 12px;
+          min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+  .card h2 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: #cbd5e1; flex: 0 0 auto;
              display: flex; justify-content: space-between; align-items: baseline; }
   .card h2 small { color: #777; font-weight: 400; }
-  canvas { display: block; width: 100%; }
-  .legend { display: flex; gap: 14px; font-size: 12px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  /* Strip-chart canvases flex to fill remaining card height (their pixel
+     buffer is set in JS from clientWidth/clientHeight, so they never overgrow). */
+  .chart { display: block; width: 100%; flex: 1 1 auto; min-height: 0; }
+  .legend { display: flex; gap: 14px; font-size: 11px; margin-top: 4px; flex: 0 0 auto;
+            font-variant-numeric: tabular-nums; }
   .legend span { display: inline-flex; align-items: center; gap: 5px; }
   .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
-  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 14px;
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 13px;
         font-variant-numeric: tabular-nums; }
   .kv .v { text-align: right; color: #4ade80; }
-  .attitude { display: flex; gap: 12px; justify-content: space-around; align-items: center; }
+  .attitude { flex: 1 1 auto; min-height: 0; display: flex; gap: 12px;
+              justify-content: space-around; align-items: center; }
+  .attitude canvas { width: auto; height: 100%; max-height: 120px; aspect-ratio: 1 / 1; }
   #sensors[hidden] { display: none; }
 </style>
 </head>
@@ -51,26 +80,43 @@
   <h1>phonesense</h1>
   <span id="statusText">Waiting for a feed…</span>
 </header>
-<main>
-  <div class="stage">
-    <img id="feed" alt="live feed">
-    <div id="placeholder">
-      <div class="connect">
-        <img id="qr" src="/qr.svg" alt="scan to connect" width="180" height="180">
-        <div class="connect-text">
-          <b>Scan to connect your phone</b>
-          <div>Point the phone camera at this code, or open:</div>
-          <code id="phoneLink">/phone</code>
-          <div class="hint">Then tap through the certificate warning once and press <b>Start</b>.</div>
+<!-- Disconnected state: scan to connect. Hidden once a phone's WS is open. -->
+<div id="qrGate" class="gate">
+  <div class="connect">
+    <img id="qr" src="/qr.svg" alt="scan to connect" width="200" height="200">
+    <div class="connect-text">
+      <b>Connect your phone</b>
+      <div>Scan this QR code, or open this address in your phone's browser:</div>
+      <code id="phoneLink">/phone</code>
+      <div class="hint">Accept the certificate warning once, then tap <b>Connect</b>. Your camera and sensors show up here as soon as you start them.</div>
+    </div>
+  </div>
+</div>
+
+<main hidden>
+  <div class="col">
+    <div class="stage">
+      <img id="feed" alt="live feed">
+      <div id="cameraMsg">
+        <div>
+          <b>No camera data</b><br>
+          Press <b>Start camera</b> on your phone.
         </div>
       </div>
     </div>
   </div>
 
-  <section id="sensors" class="panels" hidden>
+  <div class="col" id="sensorCol">
+    <div id="sensorsMsg" class="msg">
+      <div>
+        <b>No sensor data</b><br>
+        Press <b>Start sensors</b> on your phone to stream motion, orientation &amp; GPS.
+      </div>
+    </div>
+    <section id="sensors" class="panels" hidden>
     <div class="card">
       <h2>Accelerometer <small>m/s²</small></h2>
-      <canvas id="accelChart" height="140"></canvas>
+      <canvas id="accelChart" class="chart"></canvas>
       <div class="legend">
         <span><i class="swatch" style="background:#f87171"></i>x <b id="ax">–</b></span>
         <span><i class="swatch" style="background:#4ade80"></i>y <b id="ay">–</b></span>
@@ -80,7 +126,7 @@
 
     <div class="card">
       <h2>Gyroscope <small>°/s</small></h2>
-      <canvas id="gyroChart" height="140"></canvas>
+      <canvas id="gyroChart" class="chart"></canvas>
       <div class="legend">
         <span><i class="swatch" style="background:#f87171"></i>x <b id="gx">–</b></span>
         <span><i class="swatch" style="background:#4ade80"></i>y <b id="gy">–</b></span>
@@ -126,48 +172,71 @@
         <div>rate</div><div class="v" id="hz">–</div>
       </div>
     </div>
-  </section>
-
-  <div class="meta">
-    Tip: to test without a phone, open <code id="phoneUrl">/phone</code> in another tab —
-    it will use this computer's webcam.
+    </section>
   </div>
 </main>
 
 <script>
 // ---- Phone URL / QR --------------------------------------------------------
 fetch('/info').then(r => r.json()).then(info => {
-  document.getElementById('phoneUrl').textContent = info.phone_url;
   document.getElementById('phoneLink').textContent = info.phone_url;
 }).catch(() => {
-  const u = location.origin + '/phone';
-  document.getElementById('phoneUrl').textContent = u;
-  document.getElementById('phoneLink').textContent = u;
+  document.getElementById('phoneLink').textContent = location.origin + '/phone';
 });
 
-// ---- Live video status -----------------------------------------------------
+// ---- Connection + per-feed state (server-driven) ---------------------------
+// The whole dashboard is gated on the phone's WebSocket: /status.connected
+// swaps the QR gate for the panels, then .camera/.sensors decide whether each
+// panel shows its live data or a "no data" message. Driving visibility from the
+// server's time-based liveness (not from the MJPEG <img> or the SSE stream,
+// whose signals are unreliable / replayed) keeps the panels honest.
 const feed = document.getElementById('feed');
-const placeholder = document.getElementById('placeholder');
+const cameraMsg = document.getElementById('cameraMsg');
+const qrGate = document.getElementById('qrGate');
+const mainEl = document.querySelector('main');
 const dot = document.getElementById('dot');
 const statusText = document.getElementById('statusText');
-function goLive() {
-  feed.style.display = 'block'; placeholder.style.display = 'none';
-  dot.classList.add('live'); statusText.textContent = 'Live';
-}
-function goOffline(msg) { dot.classList.remove('live'); statusText.textContent = msg || 'Waiting for the phone feed…'; }
+let sensorsVisible = false;
 
-// Liveness comes from the server (did a frame arrive recently?), NOT from the
-// <img>, whose load/naturalWidth signals are unreliable for a steady MJPEG.
+function applyStatus(s) {
+  const connected = !!(s && s.connected);
+  qrGate.hidden = connected;
+  mainEl.hidden = !connected;
+  dot.classList.toggle('live', connected);
+  if (!connected) {
+    statusText.textContent = 'Waiting for your phone to connect…';
+    // Reset the panels to their empty state so a reconnect starts clean (and a
+    // later first reading triggers the reveal + chart resize).
+    feed.style.display = 'none'; cameraMsg.hidden = false;
+    sensorsEl.hidden = true; sensorsMsg.hidden = false; sensorsVisible = false;
+    return;
+  }
+  // Camera panel: live feed vs "no camera data".
+  const cam = !!s.camera;
+  feed.style.display = cam ? 'block' : 'none';
+  cameraMsg.hidden = cam;
+  // Sensors panel: charts vs "no sensor data". Size canvases on first reveal,
+  // once the panel is actually laid out.
+  const sens = !!s.sensors;
+  if (sens !== sensorsVisible) {
+    sensorsEl.hidden = !sens; sensorsMsg.hidden = sens;
+    if (sens) { accelChart.resize(); gyroChart.resize(); }
+    sensorsVisible = sens;
+  }
+  statusText.textContent = (cam || sens) ? 'Connected · streaming' : 'Connected · waiting for data';
+}
+
 async function pollStatus() {
   try {
-    const s = await (await fetch('/status', { cache: 'no-store' })).json();
-    s.streaming ? goLive() : goOffline();
-  } catch (e) { goOffline('Server unreachable…'); }
+    applyStatus(await (await fetch('/status', { cache: 'no-store' })).json());
+  } catch (e) {
+    applyStatus({ connected: false });
+    statusText.textContent = 'Server unreachable…';
+  }
 }
 setInterval(pollStatus, 1000);
 pollStatus();
 feed.addEventListener('error', () => { feed.src = '/camera/stream?ts=' + Date.now(); }); // re-subscribe if dropped
-feed.src = '/camera/stream?ts=' + Date.now();
 
 // ---- Strip chart (canvas, no deps) -----------------------------------------
 const N = 240; // samples kept on screen
@@ -180,10 +249,11 @@ class StripChart {
   }
   resize() {
     const dpr = devicePixelRatio || 1;
-    const w = this.canvas.clientWidth || 300, h = parseInt(this.canvas.getAttribute('height'), 10);
+    const w = this.canvas.clientWidth || 300, h = this.canvas.clientHeight || 120;
     this.canvas.width = w * dpr; this.canvas.height = h * dpr;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.w = w; this.h = h;
+    this.draw();
   }
   push(vals) {
     for (let i = 0; i < this.buf.length; i++) {
@@ -265,6 +335,7 @@ function drawCompass(heading) {
 
 // ---- SSE: push every reading -----------------------------------------------
 const sensorsEl = document.getElementById('sensors');
+const sensorsMsg = document.getElementById('sensorsMsg');
 const set = (id, v, d = 2) => document.getElementById(id).textContent =
   (v === null || v === undefined || Number.isNaN(v)) ? '–' : (typeof v === 'number' ? v.toFixed(d) : v);
 let pending = null, lastT = 0, rate = 0;
@@ -273,9 +344,12 @@ function render() {
   pending = null;
   accelChart.draw(); gyroChart.draw();
 }
+// Just ingest data; panel visibility is owned by applyStatus() from /status.
+// (The server replays its last reading to every new SSE subscriber, so a lone
+// reading can arrive with no phone connected — which is exactly why visibility
+// is driven by the server's connection state, not by this stream.)
 function onReading(s) {
   if (!s || s.type !== 'sensor') return;
-  sensorsEl.hidden = false;
   const a = s.accel || {}, g = s.gyro || {}, o = s.orient || {}, l = s.linAccel || {}, p = s.gps || {};
   accelChart.push([a.x, a.y, a.z]);
   gyroChart.push([g.x, g.y, g.z]);
@@ -298,7 +372,16 @@ function connectSensors() {
   es.onmessage = (e) => { try { onReading(JSON.parse(e.data)); } catch (_) {} };
   es.onerror = () => { /* EventSource auto-reconnects */ };
 }
-connectSensors();
+
+// The MJPEG <img> and the SSE connection never finish, so if they start while
+// the document is still loading the browser shows a perpetual tab spinner.
+// Open them only after the load event so the page is considered fully loaded.
+function startStreams() {
+  feed.src = '/camera/stream?ts=' + Date.now();
+  connectSensors();
+}
+if (document.readyState === 'complete') startStreams();
+else window.addEventListener('load', () => setTimeout(startStreams, 0));
 </script>
 </body>
 </html>

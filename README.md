@@ -45,7 +45,7 @@ uvx phonesense          # or: pipx run phonesense
 ```
 
 It prints the LAN URLs and a scannable QR code. Open the phone page, tap
-**Start**, and watch the dashboard.
+**Connect**, then **Start camera** / **Start sensors**, and watch the dashboard.
 
 ```
 phonesense --port 8080 --host 0.0.0.0 --no-qr --cert-dir ./certs
@@ -76,10 +76,14 @@ non-interactive run (piped/no terminal) keeps the default.
 
 1. Open `https://<your-lan-ip>:8080/phone` (scan the printed QR to skip typing).
 2. Tap through the one-time certificate warning (the cert is self-signed).
-3. Tap **Start camera** (left) for live video on the dashboard at
-   `https://<your-lan-ip>:8080/`, and/or **Start sensors** (right) for motion
-   data. The two are fully independent — run either on its own, and stopping one
-   leaves the other streaming.
+3. Tap **Connect** to open the link to the server. The dashboard at
+   `https://<your-lan-ip>:8080/` switches from the QR code to its two panels.
+4. Tap **Start camera** (left) for live video and/or **Start sensors** (right)
+   for motion data. Each shows up on the dashboard as you start it — until then
+   its panel shows a "no data" message. The two are fully independent; run
+   either on its own, and stopping one leaves the other streaming.
+5. Tap **Disconnect** (bottom) to end the session — the dashboard returns to the
+   QR code.
 
 > No phone handy? Open `/phone` in a second browser tab on the computer to use
 > the computer's webcam instead.
@@ -179,7 +183,8 @@ anything else.
 | `/camera/stream` | live MJPEG (the `cv2.VideoCapture` URL) |
 | `/sensors` | latest sensor reading (JSON) |
 | `/sensors/stream` | live sensor stream (SSE) |
-| `/info`, `/status` | dashboard connection info + liveness |
+| `/info` | dashboard connection info (phone URL) |
+| `/status` | phone connection state + per-feed (camera/sensors) liveness |
 | `/qr.svg` | QR code for the phone URL |
 
 Scheme: `/X` = latest single value, `/X/stream` = live stream, `/ingest` = the

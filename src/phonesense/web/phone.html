@@ -50,6 +50,9 @@
               text-align: center; background: #111; }
   #activate[hidden] { display: none; }
   #activate button { font-size: 20px; padding: 16px 28px; background: #2563eb; border-color: #2563eb; }
+  #activate button:disabled { opacity: .6; }
+  /* Bottom session control: a full-width, restrained "danger" button. */
+  #disconnectBtn { flex: 1 1 auto; background: #2a1416; border-color: #7f1d1d; color: #fca5a5; }
 </style>
 </head>
 <body>
@@ -57,7 +60,7 @@
      starts the screen-keep-awake (and Wake Lock), so iOS never shows a play
      button and no control is reachable before the screen is kept on. -->
 <div id="activate">
-  <button type="button" id="activateBtn">▶&nbsp; Tap to start</button>
+  <button type="button" id="activateBtn">Connect</button>
 </div>
 <!-- No autoplay: it has no source until the camera starts, and an empty
      autoplay video makes iOS show a (blocked-autoplay) play button. start()
@@ -98,6 +101,11 @@
       </select>
     </label>
   </div>
+</div>
+<!-- Bottom of the page: ends the session — closes the WebSocket and returns to
+     the Connect gate. -->
+<div class="bar" id="disconnectBar">
+  <button type="button" id="disconnectBtn">Disconnect</button>
 </div>
 
 <canvas id="canvas" hidden></canvas>
@@ -181,7 +189,6 @@ async function onSensorClick() {
   if (sensorBusy) return;
   if (sensorsOn) {
     stopSensors();
-    closeSocketIfIdle();
     renderControls();
     if (statusEl.className !== 'err') {
       setStatus(cameraOn ? 'Sensors stopped. Camera still streaming ✓' : 'Sensors stopped.',
@@ -227,7 +234,6 @@ async function onSensorClick() {
     }
   } catch (err) {
     setStatus('Sensors unavailable: ' + err.message, 'warn');
-    closeSocketIfIdle();
   } finally {
     sensorBusy = false; renderControls();
   }
@@ -344,7 +350,7 @@ function ensureSocket() {
 }
 
 // Unexpected close (network drop, or another phone taking over): the transport
-// is gone, so tear down both producers and reset the UI.
+// is gone, so tear down both producers and return to the Connect gate.
 function onSocketClose(ev) {
   const why = ev.reason ||
     (ev.code === 1001 ? 'another device connected to the server'
@@ -355,17 +361,53 @@ function onSocketClose(ev) {
   stopSensors();
   renderControls();
   if (statusEl.className !== 'err') setStatus('Disconnected: ' + why, 'warn');
+  showGate();
 }
 
-// Drop the socket once nothing needs it. Detach onclose first so this
-// intentional close stays silent (no "Disconnected" banner).
-function closeSocketIfIdle() {
-  if (ws && !cameraOn && !sensorsOn) {
+// ---- Session connect / disconnect ------------------------------------------
+// Connect opens the one upload socket; Disconnect closes it. The camera/sensor
+// toggles only start/stop their producers over this socket — they never open or
+// close it — so the session stays connected even with both feeds off.
+const gate = document.getElementById('activate');
+const connectBtn = document.getElementById('activateBtn');
+const disconnectBtn = document.getElementById('disconnectBtn');
+
+function showGate() {
+  gate.hidden = false;
+  connectBtn.disabled = false;
+  connectBtn.textContent = 'Connect';
+}
+
+async function connect() {
+  keepScreenOn();             // gesture-time: engage the screen wake lock
+  if (connectBtn.disabled) return;
+  connectBtn.disabled = true;
+  connectBtn.textContent = 'Connecting…';
+  try {
+    await ensureSocket();
+    gate.hidden = true;
+    if (statusEl.className !== 'err') {
+      setStatus('Connected ✓ — start the camera and/or sensors below.', 'ok');
+    }
+  } catch (e) {
+    setStatus('Connection failed: ' + e.message, 'err');
+    showGate();
+  }
+}
+
+// Intentional close: detach onclose so it stays silent (no auto-reconnect / gate
+// race), drop the producers, and show the gate.
+function disconnect() {
+  if (ws) {
     ws.onclose = null;
     try { ws.close(); } catch (e) {}
     ws = null;
     socketReady = null;
   }
+  stopCamera();
+  stopSensors();
+  renderControls();
+  showGate();
 }
 
 // Camera toggle (left button). Works with or without the sensors.
@@ -374,7 +416,6 @@ async function onCamClick() {
   if (camBusy) return;
   if (cameraOn) {
     stopCamera();
-    closeSocketIfIdle();
     renderControls();
     if (statusEl.className !== 'err') {
       setStatus(sensorsOn ? 'Camera stopped. Sensors still streaming ✓' : 'Camera stopped.',
@@ -395,9 +436,8 @@ async function onCamClick() {
     setStatus('Camera streaming ✓ — open the dashboard on your computer.', 'ok');
     startCaptureLoop();
   } catch (e) {
-    setStatus('Camera/connection failed: ' + e.message, 'err');
+    setStatus('Camera failed: ' + e.message, 'err');
     if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-    closeSocketIfIdle();
   } finally {
     camBusy = false; renderControls();
   }
@@ -486,12 +526,10 @@ camBtn.addEventListener('click', onCamClick);
 sensorBtn.addEventListener('click', onSensorClick);
 renderControls();
 
-// First tap activates: engage the screen-keep-awake within the gesture, then
-// drop the gate so the camera/sensor controls become usable.
-document.getElementById('activate').addEventListener('click', function activate(e) {
-  keepScreenOn();
-  e.currentTarget.hidden = true;
-}, { once: true });
+// The gate's Connect button opens the upload socket (and engages keep-awake
+// within the gesture); Disconnect closes it and brings the gate back.
+connectBtn.addEventListener('click', connect);
+disconnectBtn.addEventListener('click', disconnect);
 
 // Try the Wake Lock on load (granted without a gesture where supported, e.g.
 // Android Chrome). The canvas-video fallback can't run until the first tap —

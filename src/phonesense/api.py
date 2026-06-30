@@ -138,7 +138,7 @@ class Camera:
 
     @property
     def is_streaming(self):
-        """True if a frame arrived in the last ~2s (mirrors /status)."""
+        """True if a frame arrived in the last ~2s (mirrors /status's camera)."""
         last = self._app["last_frame_mono"]
         if last is None:
             return False

@@ -90,12 +90,24 @@ async def info_json(request):
 
 
 async def status_json(request):
-    """Whether a frame arrived recently — reliable liveness for the dashboard."""
-    last = request.app["last_frame_mono"]
-    age = None if last is None else (time.monotonic() - last)
+    """Connection + per-feed liveness for the dashboard.
+
+    ``connected`` is the phone's WebSocket being open — it drives the dashboard's
+    QR-gate-vs-panels split, independent of whether any data is flowing yet.
+    ``camera``/``sensors`` say whether that feed produced something in the last
+    ~2s, so each panel can show its data or a "no data" message.
+    """
+    app = request.app
+    active = app["active_ws"]
+    connected = active is not None and not active.closed
+    now = time.monotonic()
+    fmono, smono = app["last_frame_mono"], app["last_sensor_mono"]
+    cam = fmono is not None and (now - fmono) < 2.0
+    sens = smono is not None and (now - smono) < 2.0
     return web.json_response({
-        "streaming": age is not None and age < 2.0,
-        "age_ms": None if age is None else round(age * 1000),
+        "connected": connected,
+        "camera": cam,
+        "sensors": sens,
     })
 
 
@@ -193,6 +205,7 @@ async def stream_ws(request):
                 if data.get("type") == "sensor":
                     await sensor_hub.publish(data)
                     request.app["latest_sensor"] = data
+                    request.app["last_sensor_mono"] = time.monotonic()
             elif msg.type == WSMsgType.ERROR:
                 print(f"[ingest] ws error: {ws.exception()}")
     finally:
@@ -289,6 +302,7 @@ def build_app() -> web.Application:
     app["hub"] = LatestHub()         # latest JPEG frame (drives /camera/stream)
     app["sensor_hub"] = LatestHub()  # latest sensor reading (drives /sensors/stream)
     app["last_frame_mono"] = None    # monotonic time of the last frame received
+    app["last_sensor_mono"] = None   # monotonic time of the last sensor reading received
     app["active_ws"] = None          # the one phone currently streaming (single-phone policy)
     app["latest_jpeg"] = None        # latest JPEG bytes, for cross-thread sync readers
     app["latest_sensor"] = None      # latest sensor dict, for cross-thread sync readers
