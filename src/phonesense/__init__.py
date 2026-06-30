@@ -17,6 +17,6 @@ See ``phonesense.start`` and the ``Camera`` handle it returns.
 
 from .api import Camera, start
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = ["start", "Camera", "__version__"]
